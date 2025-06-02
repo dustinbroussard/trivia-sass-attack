@@ -3,15 +3,9 @@ import React, { useState, useEffect } from 'react';
 import CategoryTracker, { Category } from './CategoryTracker';
 import QuestionCard from './QuestionCard';
 import { Button } from '@/components/ui/button';
-import { Users, RotateCcw, Trophy, Target } from 'lucide-react';
-
-interface Player {
-  id: string;
-  name: string;
-  completedCategories: Category[];
-  streak: number;
-  score: number;
-}
+import { Users, RotateCcw, Trophy, Target, Clock } from 'lucide-react';
+import { gameService } from '@/services/gameService';
+import { GameState, TriviaQuestion, GameStats } from '@/types/game';
 
 interface GameProps {
   playerName: string;
@@ -21,167 +15,133 @@ interface GameProps {
   onBackToLobby: () => void;
 }
 
-// Mock data for now - will be replaced with OpenRouter API
-const mockQuestions = {
-  'History': [
-    {
-      question: "Which ancient wonder of the world was located in Alexandria?",
-      correct_answer: "The Lighthouse of Alexandria",
-      wrong_answers: ["The Hanging Gardens", "The Colossus", "The Mausoleum"],
-      quip_correct: "Look who knows their ancient architecture! 🏛️",
-      quip_wrong: "Clearly not a history buff. The lighthouse guided ships, not your guessing! 🚢"
-    }
-  ],
-  'Science': [
-    {
-      question: "What is the chemical symbol for gold?",
-      correct_answer: "Au",
-      wrong_answers: ["Go", "Gd", "Ag"],
-      quip_correct: "Golden brain you've got there! ✨",
-      quip_wrong: "Swing and a miss! Au is from the Latin 'aurum'. Back to chemistry class! ⚗️"
-    }
-  ],
-  'Pop Culture': [
-    {
-      question: "Which social media platform was originally called 'FaceMash'?",
-      correct_answer: "Facebook",
-      wrong_answers: ["Instagram", "Snapchat", "TikTok"],
-      quip_correct: "Someone's been paying attention to tech history! 📱",
-      quip_wrong: "Nope! Zuckerberg started with FaceMash in his dorm. Try keeping up! 💻"
-    }
-  ],
-  'Art & Music': [
-    {
-      question: "Which artist painted 'The Starry Night'?",
-      correct_answer: "Vincent van Gogh",
-      wrong_answers: ["Pablo Picasso", "Claude Monet", "Salvador Dalí"],
-      quip_correct: "You've got some culture in you after all! 🎨",
-      quip_wrong: "Swing and a miss! Van Gogh would be rolling in his grave! 🌌"
-    }
-  ],
-  'Sports': [
-    {
-      question: "How many rings are on the Olympic flag?",
-      correct_answer: "5",
-      wrong_answers: ["4", "6", "7"],
-      quip_correct: "Olympic knowledge! Going for the gold! 🥇",
-      quip_wrong: "Not exactly Olympic material, are we? 🤦‍♂️"
-    }
-  ],
-  'Random': [
-    {
-      question: "What's the most stolen food in the world?",
-      correct_answer: "Cheese",
-      wrong_answers: ["Bread", "Chocolate", "Bananas"],
-      quip_correct: "You know your crime statistics! Suspicious... 🧀",
-      quip_wrong: "Wrong! It's cheese. Maybe you should stick to legal food acquisition! 🕵️"
-    }
-  ]
-};
-
 const Game: React.FC<GameProps> = ({ playerName, apiKey, gameMode, gameCode, onBackToLobby }) => {
-  const [currentPlayer, setCurrentPlayer] = useState<Player>({
-    id: '1',
-    name: playerName,
-    completedCategories: [],
-    streak: 0,
-    score: 0
-  });
-  
-  const [opponent] = useState<Player>({
-    id: '2',
-    name: gameMode === 'multiplayer' ? 'Waiting for opponent...' : 'Solo Mode',
-    completedCategories: [],
-    streak: 0,
-    score: 0
-  });
+  const [gameState, setGameState] = useState<GameState | null>(null);
+  const [currentQuestion, setCurrentQuestion] = useState<TriviaQuestion | null>(null);
+  const [gamePhase, setGamePhase] = useState<'loading' | 'playing' | 'waiting' | 'won' | 'lost' | 'category-select'>('loading');
+  const [gameStats, setGameStats] = useState<GameStats>(gameService.getGameStats());
+  const [isLoading, setIsLoading] = useState(false);
 
-  const [currentCategory, setCurrentCategory] = useState<Category>('History');
-  const [currentQuestion, setCurrentQuestion] = useState(mockQuestions.History[0]);
-  const [gamePhase, setGamePhase] = useState<'playing' | 'waiting' | 'won' | 'lost' | 'category-select'>('playing');
-  const [isMyTurn, setIsMyTurn] = useState(true);
-  const [canChooseCategory, setCanChooseCategory] = useState(false);
+  useEffect(() => {
+    initializeGame();
+  }, []);
 
-  const categories: Category[] = ['History', 'Science', 'Pop Culture', 'Art & Music', 'Sports', 'Random'];
-  
-  const handleAnswer = (answer: string, isCorrect: boolean) => {
-    console.log(`Answer: ${answer}, Correct: ${isCorrect}`);
+  const initializeGame = async () => {
+    let newGameState: GameState;
     
-    if (isCorrect) {
-      const newCompletedCategories = [...currentPlayer.completedCategories, currentCategory];
-      const newStreak = currentPlayer.streak + 1;
-      
-      setCurrentPlayer(prev => ({
-        ...prev,
-        completedCategories: newCompletedCategories,
-        streak: newStreak,
-        score: prev.score + 1
-      }));
-
-      // Check for win condition
-      if (newCompletedCategories.length === 6) {
-        setGamePhase('won');
-        return;
+    if (gameMode === 'single') {
+      newGameState = gameService.createSinglePlayerGame(playerName);
+    } else {
+      if (gameCode) {
+        const joined = gameService.joinMultiplayerGame(playerName, gameCode);
+        if (joined) {
+          newGameState = joined;
+        } else {
+          newGameState = gameService.createMultiplayerGame(playerName, gameCode);
+        }
+      } else {
+        // Generate new game code
+        const newCode = Math.floor(1000 + Math.random() * 9000).toString();
+        newGameState = gameService.createMultiplayerGame(playerName, newCode);
       }
+    }
+    
+    setGameState(newGameState);
+    
+    if (newGameState.status === 'active') {
+      await loadNextQuestion();
+    } else {
+      setGamePhase('waiting');
+    }
+  };
 
-      // Check if player can choose category (3+ streak)
-      if (newStreak >= 3) {
-        setCanChooseCategory(true);
+  const loadNextQuestion = async (category?: Category) => {
+    if (!gameState) return;
+    
+    setIsLoading(true);
+    
+    try {
+      const question = await gameService.getNextQuestion(category);
+      if (question) {
+        setCurrentQuestion(question);
+        setGamePhase('playing');
+      }
+    } catch (error) {
+      console.error('Failed to load question:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleAnswer = async (answerIndex: number) => {
+    const result = gameService.answerQuestion(answerIndex);
+    const updatedGameState = gameService.getGameState();
+    const updatedStats = gameService.getGameStats();
+    
+    setGameState(updatedGameState);
+    setGameStats(updatedStats);
+    
+    if (updatedGameState?.status === 'completed') {
+      setGamePhase('won');
+      return;
+    }
+    
+    if (result.correct) {
+      // Check if player can choose category
+      if (gameService.canChooseCategory()) {
         setGamePhase('category-select');
         return;
       }
-
-      // Continue turn, pick new category
+      
+      // Continue with next question
       setTimeout(() => {
-        pickNextCategory(newStreak);
+        loadNextQuestion();
       }, 2500);
     } else {
-      // Reset streak and end turn
-      setCurrentPlayer(prev => ({ ...prev, streak: 0 }));
-      
+      // Wrong answer - either wait for opponent turn or continue in solo
       if (gameMode === 'multiplayer') {
-        setIsMyTurn(false);
         setGamePhase('waiting');
-        
+        // In real implementation, this would listen to Supabase updates
         setTimeout(() => {
-          setIsMyTurn(true);
           setGamePhase('playing');
-          pickNextCategory(0);
+          loadNextQuestion();
         }, 3000);
       } else {
-        // In single player, just continue
         setTimeout(() => {
-          pickNextCategory(0);
+          loadNextQuestion();
         }, 2500);
       }
     }
   };
 
-  const pickNextCategory = (streak: number) => {
-    const availableCategories = categories.filter(cat => 
-      !currentPlayer.completedCategories.includes(cat)
-    );
-    
-    if (availableCategories.length === 0) return;
-    
-    const randomCategory = availableCategories[Math.floor(Math.random() * availableCategories.length)];
-    setCurrentCategory(randomCategory);
-    setCurrentQuestion(mockQuestions[randomCategory][0]);
-    setGamePhase('playing');
-  };
-
   const handleCategoryChoice = (category: Category) => {
-    setCurrentCategory(category);
-    setCurrentQuestion(mockQuestions[category][0]);
-    setCanChooseCategory(false);
     setGamePhase('playing');
+    loadNextQuestion(category);
   };
 
-  const getShuffledAnswers = () => {
-    const answers = [currentQuestion.correct_answer, ...currentQuestion.wrong_answers];
-    return answers.sort(() => Math.random() - 0.5);
+  const handlePlayAgain = () => {
+    gameService.resetGame();
+    initializeGame();
   };
 
+  const currentPlayer = gameState ? gameService.getCurrentPlayer() : null;
+  const isMyTurn = currentPlayer?.id === gameState?.currentTurn;
+
+  // Loading state
+  if (gamePhase === 'loading' || isLoading) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center p-4">
+        <div className="text-center">
+          <h2 className="text-3xl font-bold text-cyan-400 mb-4 animate-pulse">
+            🧠 Summoning trivia gods...
+          </h2>
+          <div className="animate-spin text-4xl">⚡</div>
+        </div>
+      </div>
+    );
+  }
+
+  // Win state
   if (gamePhase === 'won') {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center p-4">
@@ -192,20 +152,34 @@ const Game: React.FC<GameProps> = ({ playerName, apiKey, gameMode, gameCode, onB
           <p className="text-2xl text-cyan-400 mb-2">
             Damn, you actually know stuff!
           </p>
-          <p className="text-gray-400">
-            Final Score: {currentPlayer.score} points | Best Streak: {Math.max(...[currentPlayer.streak])}
-          </p>
+          
           {gameMode === 'single' && (
-            <div className="mt-4 p-4 bg-gray-800/50 rounded-lg border border-gray-600">
-              <p className="text-yellow-400 mb-2">📊 Solo Stats:</p>
-              <p className="text-sm text-gray-300">Categories Completed: {currentPlayer.completedCategories.length}/6</p>
-              <p className="text-sm text-gray-300">Accuracy: {Math.round((currentPlayer.score / (currentPlayer.score + 1)) * 100)}%</p>
+            <div className="mt-6 p-6 bg-gray-800/50 rounded-lg border border-gray-600 max-w-md mx-auto">
+              <p className="text-yellow-400 mb-4 text-xl">📊 Session Stats:</p>
+              <div className="grid grid-cols-2 gap-4 text-sm">
+                <div className="text-center">
+                  <p className="text-gray-300">Accuracy</p>
+                  <p className="text-2xl font-bold text-green-400">{gameStats.accuracy}%</p>
+                </div>
+                <div className="text-center">
+                  <p className="text-gray-300">Best Streak</p>
+                  <p className="text-2xl font-bold text-yellow-400">{gameStats.longestStreak}</p>
+                </div>
+                <div className="text-center">
+                  <p className="text-gray-300">Questions</p>
+                  <p className="text-xl font-bold text-cyan-400">{gameStats.correctAnswers}/{gameStats.totalQuestions}</p>
+                </div>
+                <div className="text-center">
+                  <p className="text-gray-300">Categories</p>
+                  <p className="text-xl font-bold text-purple-400">{gameStats.categoriesCompleted}/6</p>
+                </div>
+              </div>
             </div>
           )}
         </div>
         
         <div className="space-y-4">
-          <Button className="game-button bg-gradient-to-r from-green-500 to-cyan-500 border-green-400">
+          <Button onClick={handlePlayAgain} className="game-button bg-gradient-to-r from-green-500 to-cyan-500 border-green-400">
             <RotateCcw className="mr-2 h-5 w-5" />
             {gameMode === 'single' ? 'Play Again' : 'Rematch'}
           </Button>
@@ -217,9 +191,11 @@ const Game: React.FC<GameProps> = ({ playerName, apiKey, gameMode, gameCode, onB
     );
   }
 
+  // Category selection phase
   if (gamePhase === 'category-select') {
+    const categories: Category[] = ['History', 'Science', 'Pop Culture', 'Art & Music', 'Sports', 'Random'];
     const availableCategories = categories.filter(cat => 
-      !currentPlayer.completedCategories.includes(cat)
+      !currentPlayer?.completedCategories.includes(cat)
     );
 
     return (
@@ -248,6 +224,7 @@ const Game: React.FC<GameProps> = ({ playerName, apiKey, gameMode, gameCode, onB
     );
   }
 
+  // Waiting for opponent
   if (gamePhase === 'waiting' && gameMode === 'multiplayer') {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center p-4">
@@ -259,10 +236,10 @@ const Game: React.FC<GameProps> = ({ playerName, apiKey, gameMode, gameCode, onB
           <div className="animate-pulse">
             <Users className="h-16 w-16 mx-auto text-cyan-400" />
           </div>
-          {gameCode && (
+          {gameState?.id && (
             <div className="mt-8 p-4 bg-gray-800/50 rounded-lg border border-gray-600">
               <p className="text-gray-400 text-sm">Game Code:</p>
-              <p className="text-2xl font-bold text-cyan-400 tracking-widest">{gameCode}</p>
+              <p className="text-2xl font-bold text-cyan-400 tracking-widest">{gameState.id}</p>
             </div>
           )}
         </div>
@@ -270,16 +247,17 @@ const Game: React.FC<GameProps> = ({ playerName, apiKey, gameMode, gameCode, onB
     );
   }
 
+  // Main game view
   return (
     <div className="min-h-screen p-4 flex flex-col">
       {/* Game Header */}
       <div className="flex justify-between items-center mb-6">
         <div className="flex items-center space-x-4">
           <h1 className="text-2xl font-bold text-pink-400">AFTG</h1>
-          {gameCode && (
+          {gameState?.id && gameMode === 'multiplayer' && (
             <div className="bg-gray-800/50 px-3 py-1 rounded border border-gray-600">
               <span className="text-gray-400 text-sm">Code: </span>
-              <span className="text-cyan-400 font-bold">{gameCode}</span>
+              <span className="text-cyan-400 font-bold">{gameState.id}</span>
             </div>
           )}
           {gameMode === 'single' && (
@@ -296,35 +274,51 @@ const Game: React.FC<GameProps> = ({ playerName, apiKey, gameMode, gameCode, onB
         </Button>
       </div>
 
+      {/* Stats for solo mode */}
+      {gameMode === 'single' && (
+        <div className="mb-4 p-3 bg-gray-800/30 rounded-lg border border-gray-600">
+          <div className="flex justify-between items-center text-sm">
+            <span className="text-gray-400">Accuracy: <span className="text-green-400 font-bold">{gameStats.accuracy}%</span></span>
+            <span className="text-gray-400">Streak: <span className="text-yellow-400 font-bold">{currentPlayer?.streak || 0}</span></span>
+            <span className="text-gray-400">Score: <span className="text-cyan-400 font-bold">{currentPlayer?.score || 0}</span></span>
+          </div>
+        </div>
+      )}
+
       {/* Player Trackers */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-        <CategoryTracker
-          completedCategories={currentPlayer.completedCategories}
-          currentCategory={isMyTurn ? currentCategory : undefined}
-          playerName={currentPlayer.name}
-          streak={currentPlayer.streak}
-        />
-        {gameMode === 'multiplayer' && (
+        {currentPlayer && (
           <CategoryTracker
-            completedCategories={opponent.completedCategories}
-            playerName={opponent.name}
+            completedCategories={currentPlayer.completedCategories}
+            currentCategory={isMyTurn ? gameState?.currentCategory : undefined}
+            playerName={currentPlayer.name}
+            streak={currentPlayer.streak}
+          />
+        )}
+        {gameMode === 'multiplayer' && gameState?.players[1] && (
+          <CategoryTracker
+            completedCategories={gameState.players[1].completedCategories}
+            playerName={gameState.players[1].name}
             isOpponent={true}
           />
         )}
       </div>
 
       {/* Question Area */}
-      {isMyTurn && gamePhase === 'playing' && (
+      {isMyTurn && gamePhase === 'playing' && currentQuestion && gameState?.currentCategory && (
         <div className="flex-1 flex items-center justify-center">
           <QuestionCard
-            category={currentCategory}
+            category={gameState.currentCategory}
             question={currentQuestion.question}
-            answers={getShuffledAnswers()}
-            correctAnswer={currentQuestion.correct_answer}
-            onAnswer={handleAnswer}
-            streak={currentPlayer.streak}
-            quipCorrect={currentQuestion.quip_correct}
-            quipWrong={currentQuestion.quip_wrong}
+            answers={currentQuestion.choices}
+            correctAnswer={currentQuestion.choices[currentQuestion.answer_index]}
+            onAnswer={(answerText: string, isCorrect: boolean) => {
+              const answerIndex = currentQuestion.choices.indexOf(answerText);
+              handleAnswer(answerIndex);
+            }}
+            streak={currentPlayer?.streak || 0}
+            quipCorrect={currentQuestion.correct_quip}
+            quipWrong=""
           />
         </div>
       )}
