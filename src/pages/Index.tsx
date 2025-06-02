@@ -1,12 +1,38 @@
-// Update this page (the content is just a fallback if you fail to update the page)
+
+import React, { useState } from 'react';
+import GameLobby from '@/components/GameLobby';
+import Game from '@/components/Game';
+
+type GameState = 'lobby' | 'playing';
 
 const Index = () => {
+  const [gameState, setGameState] = useState<GameState>('lobby');
+  const [playerName, setPlayerName] = useState('');
+  const [apiKey, setApiKey] = useState('');
+
+  const handleStartGame = (name: string, key: string) => {
+    setPlayerName(name);
+    setApiKey(key);
+    setGameState('playing');
+  };
+
+  const handleBackToLobby = () => {
+    setGameState('lobby');
+    setPlayerName('');
+    setApiKey('');
+  };
+
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-100">
-      <div className="text-center">
-        <h1 className="text-4xl font-bold mb-4">Welcome to Your Blank App</h1>
-        <p className="text-xl text-gray-600">Start building your amazing project here!</p>
-      </div>
+    <div className="min-h-screen bg-black">
+      {gameState === 'lobby' ? (
+        <GameLobby onStartGame={handleStartGame} />
+      ) : (
+        <Game 
+          playerName={playerName} 
+          apiKey={apiKey} 
+          onBackToLobby={handleBackToLobby}
+        />
+      )}
     </div>
   );
 };

@@ -1,0 +1,38 @@
+
+{
+  "name": "A F-ing Trivia Game",
+  "short_name": "AFTG",
+  "description": "Fast, Funny, Fair trivia with no BS",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#000000",
+  "theme_color": "#00FFFF",
+  "icons": [
+    {
+      "src": "/lovable-uploads/e8ba30c4-f893-494a-9fa5-92837d5ca9ab.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/lovable-uploads/e8ba30c4-f893-494a-9fa5-92837d5ca9ab.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ],
+  "orientation": "portrait-primary",
+  "categories": ["games", "entertainment"],
+  "shortcuts": [
+    {
+      "name": "Quick Game",
+      "short_name": "Play",
+      "description": "Start a new trivia game",
+      "url": "/",
+      "icons": [
+        {
+          "src": "/lovable-uploads/e8ba30c4-f893-494a-9fa5-92837d5ca9ab.png",
+          "sizes": "96x96"
+        }
+      ]
+    }
+  ]
+}
