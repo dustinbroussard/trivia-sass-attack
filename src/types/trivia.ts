@@ -29,7 +29,8 @@ export const TriviaQuestionSchema = z.object({
 
 export type TriviaQuestion = z.infer<typeof TriviaQuestionSchema>;
 
-export type Tone = 'snark' | 'deadpan' | 'professor' | 'roast-lite';
+export const ToneValues = ['snark', 'deadpan', 'professor', 'roast-lite'] as const;
+export type Tone = typeof ToneValues[number];
 
 export interface PersonalityFlags {
   pg13Snark: boolean; // default on

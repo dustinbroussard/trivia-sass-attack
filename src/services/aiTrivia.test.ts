@@ -33,7 +33,7 @@ describe('aiTrivia.generateQuestion', () => {
 
     const out = await generateQuestion({ category: 'science', difficulty: 'easy', seed: 'test-seed' });
     expect(out.seedEcho).toBe('test-seed');
-    const key = `tsa.cache::science|easy|test-seed`;
+    const key = `tsa.cache::science|easy|test-seed|A|test-seed`;
     expect(localStorage.getItem(key)).toBeTruthy();
   });
 });
