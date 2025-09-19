@@ -20,10 +20,23 @@ export interface ChatResponse {
 
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 
+function readEnv(key: string): string | undefined {
+  if (typeof import.meta !== 'undefined' && import.meta.env && key in import.meta.env) {
+    return import.meta.env[key] as string | undefined;
+  }
+  if (typeof process !== 'undefined' && process.env) {
+    return process.env[key];
+  }
+  return undefined;
+}
+
 function getApiKey(): string {
-  const key = import.meta.env.VITE_OPENROUTER_API_KEY as string | undefined;
+  const key =
+    readEnv('VITE_OPENROUTER_API_KEY') ||
+    readEnv('OPENROUTER_API_KEY') ||
+    readEnv('OPENROUTER_API_KEY_VITE');
   if (!key) {
-    throw new Error('Missing VITE_OPENROUTER_API_KEY. Set it in .env');
+    throw new Error('Missing OpenRouter API key. Set VITE_OPENROUTER_API_KEY in your environment');
   }
   return key;
 }

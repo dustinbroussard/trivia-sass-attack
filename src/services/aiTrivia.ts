@@ -9,7 +9,23 @@ import {
   TriviaCategories,
 } from '@/types/trivia';
 
-const MODEL = (import.meta.env.VITE_OPENROUTER_MODEL as string) || 'google/gemini-2.0-flash-001';
+function readEnv(key: string): string | undefined {
+  if (typeof import.meta !== 'undefined' && import.meta.env && key in import.meta.env) {
+    return import.meta.env[key] as string | undefined;
+  }
+  if (typeof process !== 'undefined' && process.env) {
+    return process.env[key];
+  }
+  return undefined;
+}
+
+const DEFAULT_MODEL = 'google/gemini-2.0-flash-001';
+
+function resolveModel(): string {
+  return readEnv('VITE_OPENROUTER_MODEL') || readEnv('OPENROUTER_MODEL') || DEFAULT_MODEL;
+}
+
+export type RoleDiscriminator = 'A' | 'B';
 
 type GenerateParams = {
   category: TriviaCategory;
@@ -17,6 +33,18 @@ type GenerateParams = {
   seed?: string;
   tone?: Tone;
   flags?: Partial<PersonalityFlags>;
+  roleDiscriminator?: RoleDiscriminator;
+  diffToken?: string;
+};
+
+type ResolvedParams = {
+  category: TriviaCategory;
+  difficulty: 'easy' | 'medium' | 'hard';
+  seed: string;
+  tone: Tone;
+  flags: PersonalityFlags;
+  roleDiscriminator: RoleDiscriminator;
+  diffToken: string;
 };
 
 const DEFAULT_FLAGS: PersonalityFlags = {
@@ -39,15 +67,19 @@ function enforceRateLimit(category: string) {
 }
 
 // Local cache in localStorage
-function cacheKey(p: GenerateParams & { seed: string }) {
-  return `tsa.cache::${p.category}|${p.difficulty}|${p.seed}`;
+function cacheKey(p: ResolvedParams) {
+  return `tsa.cache::${p.category}|${p.difficulty}|${p.seed}|${p.roleDiscriminator}|${p.diffToken}`;
 }
 
-function saveCache(p: GenerateParams & { seed: string }, q: TriviaQuestion) {
-  try { localStorage.setItem(cacheKey(p), JSON.stringify(q)); } catch {}
+function saveCache(p: ResolvedParams, q: TriviaQuestion) {
+  try {
+    localStorage.setItem(cacheKey(p), JSON.stringify(q));
+  } catch (err) {
+    if (import.meta.env.DEV) console.debug('[aiTrivia] cache save skipped', err);
+  }
 }
 
-function loadCache(p: GenerateParams & { seed: string }): TriviaQuestion | null {
+function loadCache(p: ResolvedParams): TriviaQuestion | null {
   try {
     const raw = localStorage.getItem(cacheKey(p));
     if (!raw) return null;
@@ -72,7 +104,8 @@ export function systemPrompt(flags: PersonalityFlags, tone: Tone | undefined) {
   return [constraints.join(' '), toneText, 'Output must be valid JSON only.'].join(' ');
 }
 
-export function userPrompt(p: Required<GenerateParams>, schemaExample: string, stricter = false) {
+export function userPrompt(p: ResolvedParams, schemaExample: string, stricter = false) {
+  const fairnessLine = `ROLE: ${p.roleDiscriminator}. DIFF_TOKEN: ${p.diffToken}. Produce questions of equivalent difficulty/style for roles A/B using the same diffToken; do NOT reuse the same fact.`;
   const seedLine = `SEED: ${p.seed}. Use this to choose facts and phrasing deterministically. Include "seedEcho" with the same value in the JSON.`;
   const rules = [
     `Category: ${p.category}. Difficulty: ${p.difficulty}.`,
@@ -83,7 +116,7 @@ export function userPrompt(p: Required<GenerateParams>, schemaExample: string, s
   if (stricter) {
     rules.push('Absolutely no text outside JSON. If unsure, output the JSON schema shape verbatim.');
   }
-  return [seedLine, rules.join(' '), 'Schema example:', schemaExample].join('\n');
+  return [fairnessLine, seedLine, rules.join('\n'), 'Schema example:', schemaExample].join('\n');
 }
 
 function schemaExample(): string {
@@ -125,12 +158,16 @@ export function passesContentRules(trivia: TriviaQuestion, flags: PersonalityFla
 }
 
 export async function generateQuestion(params: GenerateParams): Promise<TriviaQuestion> {
-  const p: Required<GenerateParams> = {
+  const seed = params.seed || nanoid();
+  const diffToken = params.diffToken || seed;
+  const p: ResolvedParams = {
     tone: params.tone || 'snark',
-    seed: params.seed || nanoid(),
+    seed,
     flags: { ...DEFAULT_FLAGS, ...(params.flags || {}) },
     category: params.category,
     difficulty: params.difficulty,
+    roleDiscriminator: params.roleDiscriminator || 'A',
+    diffToken,
   };
 
   enforceRateLimit(p.category);
@@ -139,7 +176,7 @@ export async function generateQuestion(params: GenerateParams): Promise<TriviaQu
   const cached = loadCache(p);
   if (cached) return cached;
 
-  const sys = systemPrompt(p.flags!, p.tone);
+  const sys = systemPrompt(p.flags, p.tone);
   const example = schemaExample();
   const makeUser = (strict = false) => userPrompt(p, example, strict);
 
@@ -152,7 +189,7 @@ export async function generateQuestion(params: GenerateParams): Promise<TriviaQu
   while (attempts < maxAttempts) {
     attempts++;
     const response = await chat({
-      model: MODEL,
+      model: resolveModel(),
       messages: [
         { role: 'system', content: sys },
         { role: 'user', content: makeUser(attempts > 1) },
@@ -180,7 +217,7 @@ export async function generateQuestion(params: GenerateParams): Promise<TriviaQu
         throw new Error('Seed echo mismatch');
       }
       // content
-      if (!passesContentRules(trivia, p.flags!)) {
+      if (!passesContentRules(trivia, p.flags)) {
         if (contentRetries < maxContentRetries) {
           contentRetries++;
           // append stricter reminder and retry
@@ -199,7 +236,7 @@ export async function generateQuestion(params: GenerateParams): Promise<TriviaQu
           }
           const parsed2 = JSON.parse(text);
           const v2 = TriviaQuestionSchema.parse(parsed2);
-          if (!passesContentRules(v2, p.flags!)) throw new Error('Content filter rejection after retry');
+          if (!passesContentRules(v2, p.flags)) throw new Error('Content filter rejection after retry');
           saveCache(p, v2);
           if (import.meta.env.DEV) console.info('[aiTrivia] Regeneration due to content filter');
           return v2;
