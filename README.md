@@ -60,6 +60,15 @@ This project is built with:
 - shadcn-ui
 - Tailwind CSS
 
+## OpenRouter Setup
+
+- Create an account at https://openrouter.ai and generate an API key.
+- Copy `.env.example` to `.env` and set `VITE_OPENROUTER_API_KEY=<your_key>`.
+- Restart the dev server after changing envs. In the browser build, requests include `HTTP-Referer` and `X-Title` per OpenRouter guidance.
+- Never commit your real key. `.env` is ignored by Git.
+
+The app uses a minimal browser client in `src/lib/openrouter.ts`. It fails fast if no key is set.
+
 ## How can I deploy this project?
 
 Simply open [Lovable](https://lovable.dev/projects/2a3035bf-d281-4472-8eca-5146b6c29289) and click on Share -> Publish.
@@ -71,3 +80,10 @@ Yes, you can!
 To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
 
 Read more here: [Setting up a custom domain](https://docs.lovable.dev/tips-tricks/custom-domain#step-by-step-guide)
+
+## How to Play Online (with Annette)
+
+- Same seed + same settings = same run. Share a seed and configuration so both see (nearly) identical questions.
+- Suggested flow: one person hosts a call, announces the seed; both click “New Question,” answer locally, then compare reactions and scores.
+- You can also pre-generate “packs” of questions for offline nights, export to JSON, and import later to play without network calls.
+- Safety toggles let you keep humor PG-13: default snark on, no politics, light innuendo optional, and always kind (no punching down).
