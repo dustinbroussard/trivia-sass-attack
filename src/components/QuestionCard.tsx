@@ -1,9 +1,8 @@
 
 import React, { useState } from 'react';
-import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Zap } from 'lucide-react';
-import { Category } from './CategoryTracker';
+import type { Category } from '@/types/game';
 
 interface QuestionCardProps {
   category: Category;
@@ -13,7 +12,7 @@ interface QuestionCardProps {
   onAnswer: (answer: string, isCorrect: boolean) => void;
   streak: number;
   quipCorrect?: string;
-  quipWrong?: string;
+  wrongQuips?: Record<string, string>;
 }
 
 const QuestionCard: React.FC<QuestionCardProps> = ({
@@ -24,7 +23,7 @@ const QuestionCard: React.FC<QuestionCardProps> = ({
   onAnswer,
   streak,
   quipCorrect = "Nice work, smartass! 🎯",
-  quipWrong = "Better luck next time, genius! 💀"
+  wrongQuips
 }) => {
   const [selectedAnswer, setSelectedAnswer] = useState<string | null>(null);
   const [showResult, setShowResult] = useState(false);
@@ -118,7 +117,16 @@ const QuestionCard: React.FC<QuestionCardProps> = ({
               ) : (
                 <div className="text-red-400">
                   <div className="text-3xl font-bold mb-3">WRONG! 💥</div>
-                  {showQuip && <p className="text-lg">{quipWrong}</p>}
+                  {showQuip && (
+                    <p className="text-lg">
+                      {(() => {
+                        if (!selectedAnswer) return null;
+                        const idx = answers.indexOf(selectedAnswer);
+                        const byIndex = wrongQuips?.[String(idx)];
+                        return byIndex || 'Better luck next time, genius! 💀';
+                      })()}
+                    </p>
+                  )}
                 </div>
               )}
             </div>

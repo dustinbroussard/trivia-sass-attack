@@ -1,8 +1,7 @@
 
 import React from 'react';
 import { Book, Users, Gamepad, Trophy, Heart, Star } from 'lucide-react';
-
-export type Category = 'History' | 'Science' | 'Pop Culture' | 'Art & Music' | 'Sports' | 'Random';
+import type { Category } from '@/types/game';
 
 interface CategoryTrackerProps {
   completedCategories: Category[];

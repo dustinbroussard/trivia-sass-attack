@@ -5,6 +5,7 @@ import { questionBankService } from './questionBank';
 export class GameService {
   private gameState: GameState | null = null;
   private gameStats: GameStats = this.initializeStats();
+  private sessionStart: number | null = null;
 
   constructor() {
     this.loadGameFromStorage();
@@ -40,6 +41,8 @@ export class GameService {
     };
 
     this.gameStats = this.initializeStats();
+    this.sessionStart = Date.now();
+    localStorage.setItem('aftg_session_start', String(this.sessionStart));
     this.saveGameToStorage();
     return this.gameState;
   }
@@ -63,6 +66,8 @@ export class GameService {
       questionBank: {}
     };
 
+    this.sessionStart = Date.now();
+    localStorage.setItem('aftg_session_start', String(this.sessionStart));
     this.saveGameToStorage();
     return this.gameState;
   }
@@ -199,15 +204,20 @@ export class GameService {
     this.gameStats.accuracy = this.gameStats.totalQuestions > 0 
       ? Math.round((this.gameStats.correctAnswers / this.gameStats.totalQuestions) * 100)
       : 0;
+    if (this.sessionStart && (this.gameState?.status === 'active' || this.gameState?.status === 'waiting')) {
+      this.gameStats.sessionTime = Math.max(0, Math.floor((Date.now() - this.sessionStart) / 1000));
+    }
     return { ...this.gameStats };
   }
 
   resetGame(): void {
     this.gameState = null;
     this.gameStats = this.initializeStats();
+    this.sessionStart = null;
     questionBankService.reset();
     localStorage.removeItem('aftg_game_state');
     localStorage.removeItem('aftg_game_stats');
+    localStorage.removeItem('aftg_session_start');
   }
 
   private saveGameToStorage(): void {
@@ -224,6 +234,16 @@ export class GameService {
       
       if (savedGame) {
         this.gameState = JSON.parse(savedGame);
+        // Resume session timer for active or waiting games
+        if (this.gameState.status === 'active' || this.gameState.status === 'waiting') {
+          const savedStart = localStorage.getItem('aftg_session_start');
+          if (savedStart && !isNaN(Number(savedStart))) {
+            this.sessionStart = Number(savedStart);
+          } else {
+            this.sessionStart = Date.now();
+            localStorage.setItem('aftg_session_start', String(this.sessionStart));
+          }
+        }
       }
       
       if (savedStats) {

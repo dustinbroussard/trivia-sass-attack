@@ -1,11 +1,13 @@
 
-import React, { useState, useEffect } from 'react';
-import CategoryTracker, { Category } from './CategoryTracker';
+import React, { useState, useEffect, useCallback } from 'react';
+import CategoryTracker from './CategoryTracker';
 import QuestionCard from './QuestionCard';
 import { Button } from '@/components/ui/button';
 import { Users, RotateCcw, Trophy, Target, Clock } from 'lucide-react';
 import { gameService } from '@/services/gameService';
-import { GameState, TriviaQuestion, GameStats } from '@/types/game';
+import { GameState, TriviaQuestion, GameStats, Category } from '@/types/game';
+import { questionBankService } from '@/services/questionBank';
+import { toast } from '@/hooks/use-toast';
 
 interface GameProps {
   playerName: string;
@@ -21,13 +23,56 @@ const Game: React.FC<GameProps> = ({ playerName, apiKey, gameMode, gameCode, onB
   const [gamePhase, setGamePhase] = useState<'loading' | 'playing' | 'waiting' | 'won' | 'lost' | 'category-select'>('loading');
   const [gameStats, setGameStats] = useState<GameStats>(gameService.getGameStats());
   const [isLoading, setIsLoading] = useState(false);
+  const [refillingCategory, setRefillingCategory] = useState<Category | null>(null);
+  const TOAST_MS = Number(import.meta.env.VITE_TOAST_MS || 2000);
+  const RETRY_TOAST_MS = Number(import.meta.env.VITE_RETRY_TOAST_MS || 1500);
 
+  
+
+  // Refresh session time every second while active
   useEffect(() => {
-    initializeGame();
-  }, []);
+    if (gamePhase === 'playing' || gamePhase === 'waiting') {
+      const id = setInterval(() => {
+        setGameStats(gameService.getGameStats());
+      }, 1000);
+      return () => clearInterval(id);
+    }
+  }, [gamePhase]);
 
-  const initializeGame = async () => {
+  // Toast notifications for question refill events
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail as { category?: Category; phase?: string; source?: string; error?: string; attempt?: number; total?: number; cooldown?: boolean; model?: string };
+      if (!detail) return;
+      if (detail.phase === 'start' && detail.category) {
+        setRefillingCategory(detail.category);
+        if (!detail.cooldown) {
+          toast({ title: 'Summoning trivia gods…', description: `Refilling ${detail.category}…`, duration: TOAST_MS });
+        }
+      } else if (detail.phase === 'end' && detail.category) {
+        setRefillingCategory(null);
+        const src = detail.source === 'openrouter' ? `OpenRouter (${detail.model || 'model'})` : (detail.source === 'local-cooldown' ? 'local bank (cooldown)' : 'local bank');
+        toast({ title: 'Questions ready!', description: `${detail.category} refilled from ${src}.`, duration: TOAST_MS });
+      } else if (detail.phase === 'error' && detail.category) {
+        setRefillingCategory(null);
+        toast({ title: 'Fetch hiccup', description: `Using local fallback for ${detail.category}.`, duration: TOAST_MS });
+      } else if (detail.phase === 'retry' && detail.attempt && detail.total) {
+        // Only toast the first retry to avoid noise
+        if (detail.attempt === 2) {
+          toast({ title: 'Retrying fetch…', description: `Attempt ${detail.attempt}/${detail.total}`, duration: RETRY_TOAST_MS });
+        }
+      }
+    };
+    if (typeof window !== 'undefined') {
+      window.addEventListener('qb:refill', handler as EventListener);
+      return () => window.removeEventListener('qb:refill', handler as EventListener);
+    }
+  }, [TOAST_MS, RETRY_TOAST_MS]);
+
+  const initializeGame = useCallback(async () => {
     let newGameState: GameState;
+    // Pass API key to question bank for live fetching
+    questionBankService.setAPIKey(apiKey);
     
     if (gameMode === 'single') {
       newGameState = gameService.createSinglePlayerGame(playerName);
@@ -49,15 +94,31 @@ const Game: React.FC<GameProps> = ({ playerName, apiKey, gameMode, gameCode, onB
     setGameState(newGameState);
     
     if (newGameState.status === 'active') {
-      await loadNextQuestion();
+      setIsLoading(true);
+      try {
+        const question = await gameService.getNextQuestion();
+        if (question) {
+          setCurrentQuestion(question);
+          setGamePhase('playing');
+        }
+      } catch (error) {
+        console.error('Failed to load question:', error);
+      } finally {
+        setIsLoading(false);
+      }
     } else {
       setGamePhase('waiting');
     }
-  };
+  }, [apiKey, gameCode, gameMode, playerName]);
+
+  useEffect(() => {
+    initializeGame();
+  }, [initializeGame]);
 
   const loadNextQuestion = async (category?: Category) => {
     if (!gameState) return;
-    
+    // Clear current question to show inline loader
+    setCurrentQuestion(null);
     setIsLoading(true);
     
     try {
@@ -127,8 +188,8 @@ const Game: React.FC<GameProps> = ({ playerName, apiKey, gameMode, gameCode, onB
   const currentPlayer = gameState ? gameService.getCurrentPlayer() : null;
   const isMyTurn = currentPlayer?.id === gameState?.currentTurn;
 
-  // Loading state
-  if (gamePhase === 'loading' || isLoading) {
+  // Loading state (initial only)
+  if (gamePhase === 'loading') {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center p-4">
         <div className="text-center">
@@ -274,13 +335,29 @@ const Game: React.FC<GameProps> = ({ playerName, apiKey, gameMode, gameCode, onB
         </Button>
       </div>
 
-      {/* Stats for solo mode */}
+      {/* Stats / header add-ons */}
       {gameMode === 'single' && (
         <div className="mb-4 p-3 bg-gray-800/30 rounded-lg border border-gray-600">
           <div className="flex justify-between items-center text-sm">
             <span className="text-gray-400">Accuracy: <span className="text-green-400 font-bold">{gameStats.accuracy}%</span></span>
             <span className="text-gray-400">Streak: <span className="text-yellow-400 font-bold">{currentPlayer?.streak || 0}</span></span>
             <span className="text-gray-400">Score: <span className="text-cyan-400 font-bold">{currentPlayer?.score || 0}</span></span>
+            <span className="text-gray-400 flex items-center"><Clock className="h-4 w-4 mr-1" />
+              <span className="font-bold text-purple-300">
+                {new Date((gameStats.sessionTime || 0) * 1000).toISOString().substring(14, 19)}
+              </span>
+            </span>
+          </div>
+        </div>
+      )}
+      {gameMode === 'multiplayer' && (
+        <div className="mb-4 p-2 bg-gray-800/30 rounded-lg border border-gray-600">
+          <div className="flex justify-end items-center text-sm">
+            <span className="text-gray-400 flex items-center"><Clock className="h-4 w-4 mr-1" />
+              <span className="font-bold text-purple-300">
+                {new Date((gameStats.sessionTime || 0) * 1000).toISOString().substring(14, 19)}
+              </span>
+            </span>
           </div>
         </div>
       )}
@@ -305,21 +382,30 @@ const Game: React.FC<GameProps> = ({ playerName, apiKey, gameMode, gameCode, onB
       </div>
 
       {/* Question Area */}
-      {isMyTurn && gamePhase === 'playing' && currentQuestion && gameState?.currentCategory && (
+      {isMyTurn && gamePhase === 'playing' && (
         <div className="flex-1 flex items-center justify-center">
-          <QuestionCard
-            category={gameState.currentCategory}
-            question={currentQuestion.question}
-            answers={currentQuestion.choices}
-            correctAnswer={currentQuestion.choices[currentQuestion.answer_index]}
-            onAnswer={(answerText: string, isCorrect: boolean) => {
-              const answerIndex = currentQuestion.choices.indexOf(answerText);
-              handleAnswer(answerIndex);
-            }}
-            streak={currentPlayer?.streak || 0}
-            quipCorrect={currentQuestion.correct_quip}
-            quipWrong=""
-          />
+          {isLoading || !currentQuestion || !gameState?.currentCategory ? (
+            <div className="w-full max-w-2xl mx-auto p-8 text-center border-2 border-gray-600 rounded-lg bg-black/50">
+              <div className="text-3xl mb-2 animate-pulse">⚡</div>
+              <p className="text-cyan-300 font-bold">
+                {refillingCategory ? `Refilling ${refillingCategory}…` : 'Fetching new questions...'}
+              </p>
+            </div>
+          ) : (
+            <QuestionCard
+              category={gameState.currentCategory}
+              question={currentQuestion.question}
+              answers={currentQuestion.choices}
+              correctAnswer={currentQuestion.choices[currentQuestion.answer_index]}
+              onAnswer={(answerText: string, isCorrect: boolean) => {
+                const answerIndex = currentQuestion.choices.indexOf(answerText);
+                handleAnswer(answerIndex);
+              }}
+              streak={currentPlayer?.streak || 0}
+              quipCorrect={currentQuestion.correct_quip}
+              wrongQuips={currentQuestion.wrong_answer_quips}
+            />
+          )}
         </div>
       )}
     </div>

@@ -3,7 +3,7 @@ export type Category = 'History' | 'Science' | 'Pop Culture' | 'Art & Music' | '
 
 export interface TriviaQuestion {
   id: string;
-  category: string;
+  category: Category;
   question: string;
   choices: string[];
   answer_index: number;
@@ -13,7 +13,7 @@ export interface TriviaQuestion {
 }
 
 export interface QuestionBank {
-  [category: string]: TriviaQuestion[];
+  [K in Category]?: TriviaQuestion[];
 }
 
 export interface GameStats {
