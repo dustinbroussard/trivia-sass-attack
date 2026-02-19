@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Zap } from 'lucide-react';
 import type { Category } from '@/types/game';
@@ -8,56 +8,69 @@ interface QuestionCardProps {
   category: Category;
   question: string;
   answers: string[];
-  correctAnswer: string;
-  onAnswer: (answer: string, isCorrect: boolean) => void;
+  onAnswer: (answerIndex: number) => Promise<{ correct: boolean; quip: string; correctIndex?: number }>;
   streak: number;
-  quipCorrect?: string;
-  wrongQuips?: Record<string, string>;
 }
 
 const QuestionCard: React.FC<QuestionCardProps> = ({
   category,
   question,
   answers,
-  correctAnswer,
   onAnswer,
   streak,
-  quipCorrect = "Nice work, smartass! 🎯",
-  wrongQuips
 }) => {
   const [selectedAnswer, setSelectedAnswer] = useState<string | null>(null);
   const [showResult, setShowResult] = useState(false);
   const [showQuip, setShowQuip] = useState(false);
+  const [result, setResult] = useState<{ correct: boolean; quip: string; correctIndex?: number } | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
-  const handleAnswerClick = (answer: string) => {
-    if (selectedAnswer || showResult) return;
+  useEffect(() => {
+    setSelectedAnswer(null);
+    setShowResult(false);
+    setShowQuip(false);
+    setResult(null);
+    setSubmitting(false);
+  }, [question, answers.join('|')]);
+
+  const handleAnswerClick = async (answer: string, index: number) => {
+    if (selectedAnswer || showResult || submitting) return;
     
     setSelectedAnswer(answer);
     setShowResult(true);
-    
-    const isCorrect = answer === correctAnswer;
-    
-    // Show quip first
-    setTimeout(() => {
+    setSubmitting(true);
+
+    try {
+      const payload = await onAnswer(index);
+      setResult(payload);
+      setTimeout(() => setShowQuip(true), 500);
+    } catch (err) {
+      setResult({
+        correct: false,
+        quip: err instanceof Error ? err.message : 'Something went wrong.',
+      });
       setShowQuip(true);
-    }, 500);
-    
-    // Then proceed with game logic
-    setTimeout(() => {
-      onAnswer(answer, isCorrect);
-    }, 2500);
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const getAnswerButtonClass = (answer: string) => {
     if (!showResult) {
       return 'w-full p-4 text-left bg-gray-800 hover:bg-gray-700 border-2 border-gray-600 rounded-lg transition-all duration-300 hover:scale-105 font-semibold';
     }
-    
-    if (answer === correctAnswer) {
+    const correctIndex = result?.correctIndex;
+    const selectedIndex = selectedAnswer ? answers.indexOf(selectedAnswer) : -1;
+
+    if (typeof correctIndex === 'number' && answers[correctIndex] === answer) {
       return 'w-full p-4 text-left bg-green-600 border-2 border-green-400 rounded-lg text-white font-bold transform scale-105';
     }
     
-    if (answer === selectedAnswer && answer !== correctAnswer) {
+    if (answer === selectedAnswer && result && result.correct && typeof correctIndex !== 'number') {
+      return 'w-full p-4 text-left bg-green-600 border-2 border-green-400 rounded-lg text-white font-bold transform scale-105';
+    }
+
+    if (answer === selectedAnswer && result && !result.correct) {
       return 'w-full p-4 text-left bg-red-600 border-2 border-red-400 rounded-lg text-white font-bold';
     }
     
@@ -98,8 +111,8 @@ const QuestionCard: React.FC<QuestionCardProps> = ({
           {answers.map((answer, index) => (
             <button
               key={index}
-              onClick={() => handleAnswerClick(answer)}
-              disabled={showResult}
+              onClick={() => handleAnswerClick(answer, index)}
+              disabled={showResult || submitting}
               className={getAnswerButtonClass(answer)}
             >
               <span className="font-bold text-lg mr-3">{String.fromCharCode(65 + index)}.</span> 
@@ -107,26 +120,17 @@ const QuestionCard: React.FC<QuestionCardProps> = ({
             </button>
           ))}
           
-          {showResult && (
+          {showResult && result && (
             <div className="mt-6 p-6 rounded-lg bg-black/50 border-2 border-gray-600 text-center">
-              {selectedAnswer === correctAnswer ? (
+              {result.correct ? (
                 <div className="text-green-400">
                   <div className="text-3xl font-bold mb-3 animate-bounce">CORRECT! 🎉</div>
-                  {showQuip && <p className="text-lg">{quipCorrect}</p>}
+                  {showQuip && <p className="text-lg">{result.quip}</p>}
                 </div>
               ) : (
                 <div className="text-red-400">
                   <div className="text-3xl font-bold mb-3">WRONG! 💥</div>
-                  {showQuip && (
-                    <p className="text-lg">
-                      {(() => {
-                        if (!selectedAnswer) return null;
-                        const idx = answers.indexOf(selectedAnswer);
-                        const byIndex = wrongQuips?.[String(idx)];
-                        return byIndex || 'Better luck next time, genius! 💀';
-                      })()}
-                    </p>
-                  )}
+                  {showQuip && <p className="text-lg">{result.quip}</p>}
                 </div>
               )}
             </div>

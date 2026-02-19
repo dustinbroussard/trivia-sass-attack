@@ -87,3 +87,26 @@ Read more here: [Setting up a custom domain](https://docs.lovable.dev/tips-trick
 - Suggested flow: one person hosts a call, announces the seed; both click “New Question,” answer locally, then compare reactions and scores.
 - You can also pre-generate “packs” of questions for offline nights, export to JSON, and import later to play without network calls.
 - Safety toggles let you keep humor PG-13: default snark on, no politics, light innuendo optional, and always kind (no punching down).
+
+## Supabase Setup (Persistence + Edge Functions)
+
+This project now uses Postgres tables + Edge Functions for multiplayer persistence and answer validation.
+
+### Migrations
+
+Apply the SQL in `supabase/migrations/20260130_trivia_persistence.sql`.
+
+### Edge Functions
+
+Deploy the functions in:
+- `supabase/functions/generate-questions`
+- `supabase/functions/start-turn`
+- `supabase/functions/submit-answer`
+
+### Required Secrets / Env Vars
+
+- Client (Vite): `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`
+- Supabase Functions: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`
+- OpenRouter for functions: `OPENROUTER_MODEL` (optional), `OPENROUTER_BASE_URL` (optional)
+
+The host provides their OpenRouter key at game start; it is never stored in the database.

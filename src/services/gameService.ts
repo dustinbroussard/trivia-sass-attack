@@ -1,258 +1,152 @@
+import { supabase } from '@/integrations/supabase/client';
+import type { Category, GamePlayerRow, GameQuestionPublic, GameRow, SubmitAnswerResult } from '@/types/game';
 
-import { GameState, Player, Category, GameStats, TriviaQuestion } from '@/types/game';
-import { questionBankService } from './questionBank';
-
-export class GameService {
-  private gameState: GameState | null = null;
-  private gameStats: GameStats = this.initializeStats();
-  private sessionStart: number | null = null;
-
-  constructor() {
-    this.loadGameFromStorage();
+export async function ensureSession(): Promise<string> {
+  const { data: sessionData } = await supabase.auth.getSession();
+  if (sessionData.session?.user?.id) {
+    return sessionData.session.user.id;
   }
-
-  private initializeStats(): GameStats {
-    return {
-      totalQuestions: 0,
-      correctAnswers: 0,
-      accuracy: 0,
-      longestStreak: 0,
-      categoriesCompleted: 0,
-      sessionTime: 0
-    };
+  const { data, error } = await supabase.auth.signInAnonymously();
+  if (error || !data.user) {
+    throw error || new Error('Unable to sign in anonymously');
   }
-
-  createSinglePlayerGame(playerName: string): GameState {
-    const player: Player = {
-      id: 'player1',
-      name: playerName,
-      completedCategories: [],
-      streak: 0,
-      score: 0
-    };
-
-    this.gameState = {
-      id: `solo_${Date.now()}`,
-      status: 'active',
-      currentTurn: player.id,
-      players: [player],
-      gameMode: 'single',
-      questionBank: {}
-    };
-
-    this.gameStats = this.initializeStats();
-    this.sessionStart = Date.now();
-    localStorage.setItem('aftg_session_start', String(this.sessionStart));
-    this.saveGameToStorage();
-    return this.gameState;
-  }
-
-  createMultiplayerGame(hostName: string, gameCode: string): GameState {
-    const host: Player = {
-      id: 'host',
-      name: hostName,
-      completedCategories: [],
-      streak: 0,
-      score: 0,
-      isHost: true
-    };
-
-    this.gameState = {
-      id: gameCode,
-      status: 'waiting',
-      currentTurn: host.id,
-      players: [host],
-      gameMode: 'multiplayer',
-      questionBank: {}
-    };
-
-    this.sessionStart = Date.now();
-    localStorage.setItem('aftg_session_start', String(this.sessionStart));
-    this.saveGameToStorage();
-    return this.gameState;
-  }
-
-  joinMultiplayerGame(playerName: string, gameCode: string): GameState | null {
-    // In a real implementation, this would query Supabase
-    // For now, simulate joining a mock game
-    const player: Player = {
-      id: 'player2',
-      name: playerName,
-      completedCategories: [],
-      streak: 0,
-      score: 0
-    };
-
-    if (this.gameState?.id === gameCode) {
-      this.gameState.players.push(player);
-      this.gameState.status = 'active';
-      this.saveGameToStorage();
-      return this.gameState;
-    }
-
-    return null;
-  }
-
-  async getNextQuestion(category?: Category): Promise<TriviaQuestion | null> {
-    if (!this.gameState) return null;
-
-    const currentPlayer = this.getCurrentPlayer();
-    if (!currentPlayer) return null;
-
-    let selectedCategory = category;
-    
-    if (!selectedCategory) {
-      // Random category selection from incomplete categories
-      const categories: Category[] = ['History', 'Science', 'Pop Culture', 'Art & Music', 'Sports', 'Random'];
-      const incompleteCategories = categories.filter(cat => 
-        !currentPlayer.completedCategories.includes(cat)
-      );
-      
-      if (incompleteCategories.length === 0) return null;
-      
-      selectedCategory = incompleteCategories[Math.floor(Math.random() * incompleteCategories.length)];
-    }
-
-    this.gameState.currentCategory = selectedCategory;
-    const question = await questionBankService.getNextQuestion(selectedCategory);
-    
-    if (question) {
-      this.gameState.currentQuestion = question;
-      this.saveGameToStorage();
-    }
-    
-    return question;
-  }
-
-  answerQuestion(answerIndex: number): { correct: boolean; quip: string } {
-    if (!this.gameState?.currentQuestion) {
-      return { correct: false, quip: "No question to answer!" };
-    }
-
-    const question = this.gameState.currentQuestion;
-    const isCorrect = answerIndex === question.answer_index;
-    const currentPlayer = this.getCurrentPlayer();
-
-    if (!currentPlayer) {
-      return { correct: false, quip: "No player found!" };
-    }
-
-    this.gameStats.totalQuestions++;
-
-    if (isCorrect) {
-      // Update player stats
-      currentPlayer.score++;
-      currentPlayer.streak++;
-      this.gameStats.correctAnswers++;
-      
-      // Check if category is completed
-      if (this.gameState.currentCategory && !currentPlayer.completedCategories.includes(this.gameState.currentCategory)) {
-        currentPlayer.completedCategories.push(this.gameState.currentCategory);
-        this.gameStats.categoriesCompleted++;
-      }
-
-      // Update longest streak
-      if (currentPlayer.streak > this.gameStats.longestStreak) {
-        this.gameStats.longestStreak = currentPlayer.streak;
-      }
-
-      // Check win condition
-      if (currentPlayer.completedCategories.length === 6) {
-        this.gameState.status = 'completed';
-        this.gameState.winner = currentPlayer.id;
-      }
-
-      this.saveGameToStorage();
-      return { correct: true, quip: question.correct_quip };
-    } else {
-      // Wrong answer - reset streak and end turn
-      currentPlayer.streak = 0;
-      
-      if (this.gameState.gameMode === 'multiplayer') {
-        this.switchTurns();
-      }
-
-      this.saveGameToStorage();
-      const wrongQuip = question.wrong_answer_quips[answerIndex.toString()] || "Wrong! Try harder next time.";
-      return { correct: false, quip: wrongQuip };
-    }
-  }
-
-  canChooseCategory(): boolean {
-    const currentPlayer = this.getCurrentPlayer();
-    return currentPlayer ? currentPlayer.streak >= 3 : false;
-  }
-
-  getCurrentPlayer(): Player | null {
-    if (!this.gameState) return null;
-    return this.gameState.players.find(p => p.id === this.gameState!.currentTurn) || null;
-  }
-
-  private switchTurns(): void {
-    if (!this.gameState || this.gameState.gameMode === 'single') return;
-    
-    const currentIndex = this.gameState.players.findIndex(p => p.id === this.gameState!.currentTurn);
-    const nextIndex = (currentIndex + 1) % this.gameState.players.length;
-    this.gameState.currentTurn = this.gameState.players[nextIndex].id;
-  }
-
-  getGameState(): GameState | null {
-    return this.gameState;
-  }
-
-  getGameStats(): GameStats {
-    this.gameStats.accuracy = this.gameStats.totalQuestions > 0 
-      ? Math.round((this.gameStats.correctAnswers / this.gameStats.totalQuestions) * 100)
-      : 0;
-    if (this.sessionStart && (this.gameState?.status === 'active' || this.gameState?.status === 'waiting')) {
-      this.gameStats.sessionTime = Math.max(0, Math.floor((Date.now() - this.sessionStart) / 1000));
-    }
-    return { ...this.gameStats };
-  }
-
-  resetGame(): void {
-    this.gameState = null;
-    this.gameStats = this.initializeStats();
-    this.sessionStart = null;
-    questionBankService.reset();
-    localStorage.removeItem('aftg_game_state');
-    localStorage.removeItem('aftg_game_stats');
-    localStorage.removeItem('aftg_session_start');
-  }
-
-  private saveGameToStorage(): void {
-    if (this.gameState) {
-      localStorage.setItem('aftg_game_state', JSON.stringify(this.gameState));
-    }
-    localStorage.setItem('aftg_game_stats', JSON.stringify(this.gameStats));
-  }
-
-  private loadGameFromStorage(): void {
-    try {
-      const savedGame = localStorage.getItem('aftg_game_state');
-      const savedStats = localStorage.getItem('aftg_game_stats');
-      
-      if (savedGame) {
-        this.gameState = JSON.parse(savedGame);
-        // Resume session timer for active or waiting games
-        if (this.gameState.status === 'active' || this.gameState.status === 'waiting') {
-          const savedStart = localStorage.getItem('aftg_session_start');
-          if (savedStart && !isNaN(Number(savedStart))) {
-            this.sessionStart = Number(savedStart);
-          } else {
-            this.sessionStart = Date.now();
-            localStorage.setItem('aftg_session_start', String(this.sessionStart));
-          }
-        }
-      }
-      
-      if (savedStats) {
-        this.gameStats = JSON.parse(savedStats);
-      }
-    } catch (error) {
-      console.warn('Failed to load game from storage:', error);
-    }
-  }
+  return data.user.id;
 }
 
-export const gameService = new GameService();
+export async function createGame(params: { name: string; code: string; mode: 'single' | 'multiplayer' }): Promise<{ gameId: string; playerId: string }> {
+  const userId = await ensureSession();
+
+  const { data: gameInsert, error: gameError } = await supabase
+    .from('games')
+    .insert({ code: params.code, status: params.mode === 'single' ? 'active' : 'waiting' })
+    .select('id')
+    .single();
+  if (gameError || !gameInsert) throw gameError || new Error('Failed to create game');
+
+  const { data: playerInsert, error: playerError } = await supabase
+    .from('game_players')
+    .insert({
+      game_id: gameInsert.id,
+      user_id: userId,
+      name: params.name,
+      role: 'host',
+    })
+    .select('id')
+    .single();
+  if (playerError || !playerInsert) throw playerError || new Error('Failed to create host player');
+
+  const { error: updateError } = await supabase
+    .from('games')
+    .update({
+      host_player_id: playerInsert.id,
+      current_turn_player_id: playerInsert.id,
+    })
+    .eq('id', gameInsert.id);
+  if (updateError) throw updateError;
+
+  return { gameId: gameInsert.id, playerId: playerInsert.id };
+}
+
+export async function joinGame(params: { name: string; code: string }): Promise<{ gameId: string; playerId: string }> {
+  const userId = await ensureSession();
+  const { data: game, error } = await supabase
+    .from('games')
+    .select('id,status,guest_player_id')
+    .eq('code', params.code)
+    .maybeSingle();
+  if (error || !game) throw error || new Error('Game not found');
+  if (game.guest_player_id) throw new Error('Game is already full');
+
+  const { data: playerInsert, error: playerError } = await supabase
+    .from('game_players')
+    .insert({
+      game_id: game.id,
+      user_id: userId,
+      name: params.name,
+      role: 'guest',
+    })
+    .select('id')
+    .single();
+  if (playerError || !playerInsert) throw playerError || new Error('Failed to join game');
+
+  const nextStatus = 'active';
+  const { error: updateError } = await supabase
+    .from('games')
+    .update({
+      guest_player_id: playerInsert.id,
+      status: nextStatus,
+    })
+    .eq('id', game.id);
+  if (updateError) throw updateError;
+
+  return { gameId: game.id, playerId: playerInsert.id };
+}
+
+export async function fetchGame(gameId: string): Promise<{
+  game: GameRow;
+  players: GamePlayerRow[];
+  question: GameQuestionPublic | null;
+}> {
+  await ensureSession();
+  const { data: game, error: gameError } = await supabase
+    .from('games')
+    .select('*')
+    .eq('id', gameId)
+    .single();
+  if (gameError || !game) throw gameError || new Error('Game not found');
+
+  const { data: players, error: playersError } = await supabase
+    .from('game_players')
+    .select('*')
+    .eq('game_id', gameId)
+    .order('created_at', { ascending: true });
+  if (playersError || !players) throw playersError || new Error('Failed to load players');
+
+  let question: GameQuestionPublic | null = null;
+  if (game.active_question_id) {
+    const { data: q, error: qError } = await supabase
+      .from('game_questions_public')
+      .select('*')
+      .eq('id', game.active_question_id)
+      .maybeSingle();
+    if (qError) throw qError;
+    question = q || null;
+  }
+
+  return { game, players, question };
+}
+
+export async function generateQuestions(params: { gameId: string; openRouterKey: string }): Promise<void> {
+  await ensureSession();
+  const { error } = await supabase.functions.invoke('generate-questions', {
+    body: params,
+  });
+  if (error) throw error;
+}
+
+export async function startTurn(params: { gameId: string; categoryChoice?: Category }): Promise<GameQuestionPublic | null> {
+  await ensureSession();
+  const { data, error } = await supabase.functions.invoke('start-turn', {
+    body: params,
+  });
+  if (error) throw error;
+  return (data?.question as GameQuestionPublic) || null;
+}
+
+export async function submitAnswer(params: {
+  gameId: string;
+  questionId: string;
+  choiceIndex: number;
+}): Promise<SubmitAnswerResult> {
+  await ensureSession();
+  const { data, error } = await supabase.functions.invoke('submit-answer', {
+    body: params,
+  });
+  if (error) throw error;
+  return data as SubmitAnswerResult;
+}
+
+export async function getCurrentUserId(): Promise<string | null> {
+  const { data } = await supabase.auth.getSession();
+  return data.session?.user?.id ?? null;
+}

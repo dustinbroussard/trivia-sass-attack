@@ -4,9 +4,15 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Gamepad, Users, Zap, Trophy, Copy } from 'lucide-react';
+import { createGame, generateQuestions, joinGame } from '@/services/gameService';
 
 interface GameLobbyProps {
-  onStartGame: (playerName: string, apiKey: string, gameMode: 'single' | 'multiplayer', gameCode?: string) => void;
+  onStartGame: (payload: {
+    gameId: string;
+    playerId: string;
+    gameCode: string;
+    gameMode: 'single' | 'multiplayer';
+  }) => void;
 }
 
 const GameLobby: React.FC<GameLobbyProps> = ({ onStartGame }) => {
@@ -15,6 +21,8 @@ const GameLobby: React.FC<GameLobbyProps> = ({ onStartGame }) => {
   const [gameMode, setGameMode] = useState<'menu' | 'single' | 'create' | 'join'>('menu');
   const [gameCode, setGameCode] = useState('');
   const [generatedCode, setGeneratedCode] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const generateGameCode = () => {
     const code = Math.floor(1000 + Math.random() * 9000).toString();
@@ -22,18 +30,39 @@ const GameLobby: React.FC<GameLobbyProps> = ({ onStartGame }) => {
     return code;
   };
 
-  const handleStartGame = () => {
+  const handleStartGame = async () => {
     if (!playerName.trim()) return;
-    
-    if (gameMode === 'single') {
-      onStartGame(playerName.trim(), '', 'single');
-    } else if (gameMode === 'create') {
-      if (!apiKey.trim()) return;
-      const code = generateGameCode();
-      onStartGame(playerName.trim(), apiKey.trim(), 'multiplayer', code);
-    } else if (gameMode === 'join') {
-      if (!gameCode.trim()) return;
-      onStartGame(playerName.trim(), '', 'multiplayer', gameCode.trim());
+    setError(null);
+    setLoading(true);
+
+    try {
+      if (gameMode === 'single') {
+        if (!apiKey.trim()) return;
+        const code = generateGameCode();
+        const { gameId, playerId } = await createGame({ name: playerName.trim(), code, mode: 'single' });
+        await generateQuestions({ gameId, openRouterKey: apiKey.trim() });
+        onStartGame({ gameId, playerId, gameCode: code, gameMode: 'single' });
+        return;
+      }
+
+      if (gameMode === 'create') {
+        if (!apiKey.trim()) return;
+        const code = generateGameCode();
+        const { gameId, playerId } = await createGame({ name: playerName.trim(), code, mode: 'multiplayer' });
+        await generateQuestions({ gameId, openRouterKey: apiKey.trim() });
+        onStartGame({ gameId, playerId, gameCode: code, gameMode: 'multiplayer' });
+        return;
+      }
+
+      if (gameMode === 'join') {
+        if (!gameCode.trim()) return;
+        const { gameId, playerId } = await joinGame({ name: playerName.trim(), code: gameCode.trim() });
+        onStartGame({ gameId, playerId, gameCode: gameCode.trim(), gameMode: 'multiplayer' });
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Something went wrong. Try again.');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -101,7 +130,7 @@ const GameLobby: React.FC<GameLobbyProps> = ({ onStartGame }) => {
                 className="bg-black/50 border-cyan-500/50 text-white placeholder-gray-400"
               />
               
-              {gameMode === 'create' && (
+              {(gameMode === 'create' || gameMode === 'single') && (
                 <Input
                   placeholder="OpenRouter API Key"
                   type="password"
@@ -133,6 +162,12 @@ const GameLobby: React.FC<GameLobbyProps> = ({ onStartGame }) => {
                 </div>
               )}
 
+              {error && (
+                <div className="p-3 rounded-md bg-red-900/40 border border-red-500/60 text-red-200 text-sm">
+                  {error}
+                </div>
+              )}
+
               <div className="flex space-x-2">
                 <Button
                   onClick={() => {
@@ -147,14 +182,15 @@ const GameLobby: React.FC<GameLobbyProps> = ({ onStartGame }) => {
                 <Button
                   onClick={handleStartGame}
                   disabled={
+                    loading ||
                     !playerName.trim() || 
-                    (gameMode === 'create' && !apiKey.trim()) ||
+                    ((gameMode === 'create' || gameMode === 'single') && !apiKey.trim()) ||
                     (gameMode === 'join' && gameCode.length !== 4)
                   }
                   className="flex-1 game-button bg-gradient-to-r from-purple-500 to-pink-500 border-purple-400"
                 >
                   <Zap className="mr-2 h-4 w-4" />
-                  {gameMode === 'single' ? 'Start!' : generatedCode ? 'Ready!' : 'Let\'s Go!'}
+                  {loading ? 'Starting...' : (gameMode === 'single' ? 'Start!' : generatedCode ? 'Ready!' : 'Let\'s Go!')}
                 </Button>
               </div>
             </div>

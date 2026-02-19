@@ -9,10 +9,140 @@ export type Json =
 export type Database = {
   public: {
     Tables: {
-      [_ in never]: never
+      games: {
+        Row: {
+          id: string
+          code: string
+          created_at: string
+          status: 'waiting' | 'active' | 'completed'
+          host_player_id: string | null
+          guest_player_id: string | null
+          current_turn_player_id: string | null
+          active_question_id: string | null
+          active_category: string | null
+          turn_number: number
+          winner_player_id: string | null
+          allow_category_choice: boolean
+        }
+        Insert: {
+          id?: string
+          code: string
+          created_at?: string
+          status?: 'waiting' | 'active' | 'completed'
+          host_player_id?: string | null
+          guest_player_id?: string | null
+          current_turn_player_id?: string | null
+          active_question_id?: string | null
+          active_category?: string | null
+          turn_number?: number
+          winner_player_id?: string | null
+          allow_category_choice?: boolean
+        }
+        Update: {
+          id?: string
+          code?: string
+          created_at?: string
+          status?: 'waiting' | 'active' | 'completed'
+          host_player_id?: string | null
+          guest_player_id?: string | null
+          current_turn_player_id?: string | null
+          active_question_id?: string | null
+          active_category?: string | null
+          turn_number?: number
+          winner_player_id?: string | null
+          allow_category_choice?: boolean
+        }
+      }
+      game_players: {
+        Row: {
+          id: string
+          game_id: string
+          created_at: string
+          user_id: string
+          name: string
+          role: 'host' | 'guest'
+          score: number
+          streak: number
+          categories_completed: string[]
+        }
+        Insert: {
+          id?: string
+          game_id: string
+          created_at?: string
+          user_id: string
+          name: string
+          role: 'host' | 'guest'
+          score?: number
+          streak?: number
+          categories_completed?: string[]
+        }
+        Update: {
+          id?: string
+          game_id?: string
+          created_at?: string
+          user_id?: string
+          name?: string
+          role?: 'host' | 'guest'
+          score?: number
+          streak?: number
+          categories_completed?: string[]
+        }
+      }
+      game_questions: {
+        Row: {
+          id: string
+          game_id: string
+          created_at: string
+          category: string
+          question_text: string
+          choices: string[]
+          correct_index: number
+          quip_correct: string
+          quip_wrong: string
+          used_at_turn: number | null
+          used_by_player_id: string | null
+        }
+        Insert: {
+          id?: string
+          game_id: string
+          created_at?: string
+          category: string
+          question_text: string
+          choices: string[]
+          correct_index: number
+          quip_correct: string
+          quip_wrong: string
+          used_at_turn?: number | null
+          used_by_player_id?: string | null
+        }
+        Update: {
+          id?: string
+          game_id?: string
+          created_at?: string
+          category?: string
+          question_text?: string
+          choices?: string[]
+          correct_index?: number
+          quip_correct?: string
+          quip_wrong?: string
+          used_at_turn?: number | null
+          used_by_player_id?: string | null
+        }
+      }
     }
     Views: {
-      [_ in never]: never
+      game_questions_public: {
+        Row: {
+          id: string
+          game_id: string
+          created_at: string
+          category: string
+          question_text: string
+          choices: string[]
+          quip_correct: string
+          quip_wrong: string
+        }
+      }
     }
     Functions: {
       [_ in never]: never
